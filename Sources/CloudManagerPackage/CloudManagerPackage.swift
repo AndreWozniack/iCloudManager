@@ -159,45 +159,46 @@ public class CloudManager<T: CloudStorable> {
     }
 
     // UPDATE
-    public func updateItem(_ newItem: T, completion: @escaping (Result<T, Error>) -> Void) {
-        let predicate = NSPredicate(format: "TRUEPREDICATE") // Consulta de verdade sempre retorna todos os registros
-        let query = CKQuery(recordType: String(describing: T.self), predicate: predicate)
-
-        fetchItems(withQuery: query) { result in
-            switch result {
-            case .success(let fetchedItems):
-                if let existingItem = fetchedItems.first(where: { $0.isSameAs(newItem) }) {
-                    let updatedRecord = newItem.toCKRecord()
-                    for key in updatedRecord.allKeys() {
-                        existingItem.setValue(updatedRecord[key], forKey: key)
-                    }
-
-                    dataBase.save(existingItem) { (savedRecord, saveError) in
-                        if let saveError = saveError {
-                            completion(.failure(saveError))
-                        } else if let savedRecord = savedRecord, let updatedItem = T.fromCKRecord(savedRecord) {
-                            completion(.success(updatedItem))
-                        }
-                    }
-                } else {
-                    completion(.failure(NSError(domain: "CloudManagerError", code: -1, userInfo: [NSLocalizedDescriptionKey: "Item not found"])))
+    public func fetchItems(withPredicate predicate: NSPredicate? = nil, completion: @escaping (Result<[T], Error>) -> Void) {
+        let query = CKQuery(recordType: T.defaultRecordType(), predicate: predicate ?? T.defaultPredicate())
+        let queryOperation = CKQueryOperation(query: query)
+        
+        var fetchedItems: [T] = []
+        
+        queryOperation.recordMatchedBlock = { (returnedRecordID, returnedResult) in
+            switch returnedResult {
+            case .success(let record):
+                if let item = T.fromCKRecord(record) {
+                    fetchedItems.append(item)
                 }
+            case .failure(let error):
+                print("Error \(error)")
+            }
+        }
+        
+        queryOperation.queryResultBlock = { result in
+            switch result {
+            case .success(_):
+                // Se você precisar continuar buscando com o cursor, pode fazê-lo aqui.
+                // Por enquanto, vamos simplesmente retornar os itens buscados.
+                completion(.success(fetchedItems))
             case .failure(let error):
                 completion(.failure(error))
             }
         }
+        
+        dataBase.add(queryOperation)
     }
     
     // DELETE
     public func deleteItem(_ item: T, completion: @escaping (Result<Void, Error>) -> Void) {
         let predicate = NSPredicate(format: "TRUEPREDICATE") // Consulta de verdade sempre retorna todos os registros
-        let query = CKQuery(recordType: String(describing: T.self), predicate: predicate)
-
-        fetchItems(withQuery: query) { result in
+        
+        fetchItems(withPredicate: predicate) { [self] result in
             switch result {
             case .success(let fetchedItems):
                 if let existingItem = fetchedItems.first(where: { $0.isSameAs(item) }) {
-                    dataBase.delete(withRecordID: existingItem.recordID!) { _, error in
+                    dataBase.delete(withRecordID: existingItem.toCKRecord().recordID) { _, error in
                         if let error = error {
                             completion(.failure(error))
                         } else {
@@ -212,6 +213,7 @@ public class CloudManager<T: CloudStorable> {
             }
         }
     }
+
 
 }
 
@@ -231,7 +233,7 @@ public extension CloudStorable {
         return false
     }
     
-    public func toCKRecord() -> CKRecord {
+    func toCKRecord() -> CKRecord {
         let record = CKRecord(recordType: String(describing: Self.self))
         let mirror = Mirror(reflecting: self)
         
@@ -244,7 +246,7 @@ public extension CloudStorable {
         return record
     }
     
-    static public func fromCKRecord(_ record: CKRecord) -> Self? {
+    static func fromCKRecord(_ record: CKRecord) -> Self? {
         var initializers: [String: Any] = [:]
         
         let mirror = Mirror(reflecting: Self.self)
