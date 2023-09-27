@@ -5,9 +5,8 @@ public protocol CloudStorable {
     init?(from record: CKRecord)
     static func fromCKRecord(_ record: CKRecord) -> Self?
     func toCKRecord() -> CKRecord
-    var recordID: CKRecord.ID? { get }
-
 }
+
 /**
  `CloudManager` é uma classe genérica projetada para simplificar o processo de interação com o CloudKit, permitindo operações CRUD (Criar, Ler, Atualizar e Deletar) em registros do iCloud.
 
@@ -159,55 +158,79 @@ public class CloudManager<T: CloudStorable> {
         dataBase.add(queryOperation)
     }
 
-    
     // UPDATE
-    public func updateItem(_ item: T, completion: @escaping (Result<T, Error>) -> Void) {
-        guard let recordID = item.recordID else {
-            completion(.failure(NSError(domain: "CloudManagerError", code: -1, userInfo: [NSLocalizedDescriptionKey: "Item does not have a recordID"])))
-            return
-        }
-        
-        dataBase.fetch(withRecordID: recordID) { (record, error) in
-            if let error = error {
-                completion(.failure(error))
-            } else if let record = record {
-                let updatedRecord = item.toCKRecord()
-                for key in updatedRecord.allKeys() {
-                    record.setValue(updatedRecord[key], forKey: key)
-                }
-                
-                self.dataBase.save(record) { (savedRecord, saveError) in
-                    if let saveError = saveError {
-                        completion(.failure(saveError))
-                    } else if let savedRecord = savedRecord, let updatedItem = T.fromCKRecord(savedRecord) {
-                        completion(.success(updatedItem))
+    public func updateItem(_ newItem: T, completion: @escaping (Result<T, Error>) -> Void) {
+        let predicate = NSPredicate(format: "TRUEPREDICATE") // Consulta de verdade sempre retorna todos os registros
+        let query = CKQuery(recordType: String(describing: T.self), predicate: predicate)
+
+        fetchItems(withQuery: query) { result in
+            switch result {
+            case .success(let fetchedItems):
+                if let existingItem = fetchedItems.first(where: { $0.isSameAs(newItem) }) {
+                    let updatedRecord = newItem.toCKRecord()
+                    for key in updatedRecord.allKeys() {
+                        existingItem.setValue(updatedRecord[key], forKey: key)
                     }
+
+                    dataBase.save(existingItem) { (savedRecord, saveError) in
+                        if let saveError = saveError {
+                            completion(.failure(saveError))
+                        } else if let savedRecord = savedRecord, let updatedItem = T.fromCKRecord(savedRecord) {
+                            completion(.success(updatedItem))
+                        }
+                    }
+                } else {
+                    completion(.failure(NSError(domain: "CloudManagerError", code: -1, userInfo: [NSLocalizedDescriptionKey: "Item not found"])))
                 }
+            case .failure(let error):
+                completion(.failure(error))
+            }
+        }
+    }
+    
+    // DELETE
+    public func deleteItem(_ item: T, completion: @escaping (Result<Void, Error>) -> Void) {
+        let predicate = NSPredicate(format: "TRUEPREDICATE") // Consulta de verdade sempre retorna todos os registros
+        let query = CKQuery(recordType: String(describing: T.self), predicate: predicate)
+
+        fetchItems(withQuery: query) { result in
+            switch result {
+            case .success(let fetchedItems):
+                if let existingItem = fetchedItems.first(where: { $0.isSameAs(item) }) {
+                    dataBase.delete(withRecordID: existingItem.recordID!) { _, error in
+                        if let error = error {
+                            completion(.failure(error))
+                        } else {
+                            completion(.success(()))
+                        }
+                    }
+                } else {
+                    completion(.failure(NSError(domain: "CloudManagerError", code: -1, userInfo: [NSLocalizedDescriptionKey: "Item not found"])))
+                }
+            case .failure(let error):
+                completion(.failure(error))
             }
         }
     }
 
-    
-    // DELETE
-    public func deleteItem(_ item: T, completion: @escaping (Result<Void, Error>) -> Void) {
-        guard let recordID = item.recordID else {
-            completion(.failure(NSError(domain: "CloudManagerError", code: -1, userInfo: [NSLocalizedDescriptionKey: "Item does not have a recordID"])))
-            return
-        }
-        
-        dataBase.delete(withRecordID: recordID) { (_, error) in
-            if let error = error {
-                completion(.failure(error))
-            } else {
-                completion(.success(()))
-            }
-        }
-    }
 }
 
 
 
-extension CloudStorable {
+public extension CloudStorable {
+    static func defaultRecordType() -> String {
+            return String(describing: Self.self)
+        }
+        
+    static func defaultPredicate() -> NSPredicate {
+        return NSPredicate(value: true)
+    }
+        
+    func isSameAs(_ other: Self) -> Bool {
+        
+        return false
+    }
+    
     public func toCKRecord() -> CKRecord {
         let record = CKRecord(recordType: String(describing: Self.self))
         let mirror = Mirror(reflecting: self)
