@@ -116,7 +116,7 @@ public class CloudManager<T: CloudStorable> {
     
     
     // CREATE
-    func saveItem(_ item: T, completion: @escaping (Result<T, Error>) -> Void) {
+    public func saveItem(_ item: T, completion: @escaping (Result<T, Error>) -> Void) {
         dataBase.save(item.toCKRecord()) { returnedRecord, error in
             if let error = error {
                 completion(.failure(error))
@@ -127,7 +127,7 @@ public class CloudManager<T: CloudStorable> {
     }
     
     // READ
-    func fetchItems(_ completion: @escaping (Result<[T], Error>) -> Void) {
+    public func fetchItems(_ completion: @escaping (Result<[T], Error>) -> Void) {
         let predicate = NSPredicate(value: true)
         let query = CKQuery(recordType: String(describing: T.self), predicate: predicate)
         let queryOperation = CKQueryOperation(query: query)
@@ -161,7 +161,7 @@ public class CloudManager<T: CloudStorable> {
 
     
     // UPDATE
-    func updateItem(_ item: T, completion: @escaping (Result<T, Error>) -> Void) {
+    public func updateItem(_ item: T, completion: @escaping (Result<T, Error>) -> Void) {
         guard let recordID = item.recordID else {
             completion(.failure(NSError(domain: "CloudManagerError", code: -1, userInfo: [NSLocalizedDescriptionKey: "Item does not have a recordID"])))
             return
@@ -189,7 +189,7 @@ public class CloudManager<T: CloudStorable> {
 
     
     // DELETE
-    func deleteItem(_ item: T, completion: @escaping (Result<Void, Error>) -> Void) {
+    public func deleteItem(_ item: T, completion: @escaping (Result<Void, Error>) -> Void) {
         guard let recordID = item.recordID else {
             completion(.failure(NSError(domain: "CloudManagerError", code: -1, userInfo: [NSLocalizedDescriptionKey: "Item does not have a recordID"])))
             return
@@ -208,7 +208,7 @@ public class CloudManager<T: CloudStorable> {
 
 
 extension CloudStorable {
-    func toCKRecord() -> CKRecord {
+    public func toCKRecord() -> CKRecord {
         let record = CKRecord(recordType: String(describing: Self.self))
         let mirror = Mirror(reflecting: self)
         
@@ -221,7 +221,7 @@ extension CloudStorable {
         return record
     }
     
-    static func fromCKRecord(_ record: CKRecord) -> Self? {
+    static public func fromCKRecord(_ record: CKRecord) -> Self? {
         var initializers: [String: Any] = [:]
         
         let mirror = Mirror(reflecting: Self.self)
