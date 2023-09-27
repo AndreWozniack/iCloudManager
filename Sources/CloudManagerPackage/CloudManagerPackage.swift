@@ -66,7 +66,7 @@ protocol CloudStorable {
     - iOS 15.0 ou superior.
     - Conformidade com o protocolo `CloudStorable` para os tipos que você deseja gerenciar com `CloudManager`.
 */
-class CloudManager<T: CloudStorable> {
+public class CloudManager<T: CloudStorable> {
 
     let container: CKContainer
     let dataBase: CKDatabase
