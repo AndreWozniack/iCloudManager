@@ -73,7 +73,7 @@ public class CloudManager<T: CloudStorable> {
     var iCloudOk : Bool = false
     var items: [T] = []
     
-    init() {
+    public init() {
         container = CKContainer.default()
         dataBase = container.privateCloudDatabase
         checkiCloudAccountStatus()
