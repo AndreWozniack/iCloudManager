@@ -260,3 +260,37 @@ public extension CloudStorable {
     }
 }
 
+public extension CloudStorable where Self == MediaItem {
+    static func defaultRecordType() -> String {
+        return "MediaItem"
+    }
+
+    static func defaultPredicate() -> NSPredicate {
+        return NSPredicate(value: true)
+    }
+
+    func isSameAs(_ other: Self) -> Bool {
+        return false // Defina sua lógica de comparação aqui
+    }
+}
+
+public extension CloudManager where T == MediaItem {
+    func saveImage(_ image: UIImage, withDescription description: String, completion: @escaping (Result<MediaItem, Error>) -> Void) {
+        guard let data = image.jpegData(compressionQuality: 0.7) else {
+            completion(.failure(NSError(domain: "ImageError", code: -1, userInfo: [NSLocalizedDescriptionKey: "Failed to convert UIImage to Data"])))
+            return
+        }
+        
+        let temporaryURL = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent(UUID().uuidString).appendingPathExtension("jpg")
+        do {
+            try data.write(to: temporaryURL)
+            let asset = CKAsset(fileURL: temporaryURL)
+            let mediaItem = MediaItem(asset: asset, type: .image, description: description)
+            saveItem(mediaItem, completion: completion)
+        } catch {
+            completion(.failure(error))
+        }
+    }
+    
+    // Similarmente, você pode adicionar um método para salvar vídeos, etc.
+}
