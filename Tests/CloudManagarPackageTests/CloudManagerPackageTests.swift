@@ -1,7 +1,7 @@
 import XCTest
-@testable import CloudManagarPackage
+@testable import CloudManagerPackage
 
-final class CloudManagarPackageTests: XCTestCase {
+final class CloudManagerPackageTests: XCTestCase {
     func testExample() throws {
         // XCTest Documentation
         // https://developer.apple.com/documentation/xctest
