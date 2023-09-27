@@ -239,58 +239,68 @@ public extension CloudStorable {
         
         for child in mirror.children {
             if let key = child.label {
-                record.setValue(child.value, forKey: key)
+                if let dataValue = child.value as? Data {
+                    record.setValue(toCKAsset(from: dataValue, withKey: key), forKey: key)
+                } else {
+                    record.setValue(child.value, forKey: key)
+                }
             }
         }
         
         return record
     }
+
     
     static func fromCKRecord(_ record: CKRecord) -> Self? {
         var initializers: [String: Any] = [:]
-        
+
         let mirror = Mirror(reflecting: Self.self)
         for child in mirror.children {
-            if let key = child.label, let value = record[key] {
-                initializers[key] = value
+            if let key = child.label {
+                if record[key] is CKAsset {
+                    initializers[key] = Self.data(from: record[key] as? CKAsset)  // Use 'Self' para chamar métodos estáticos
+                } else {
+                    initializers[key] = record[key]
+                }
             }
         }
-        
+
         return Self.init(from: record)
     }
-}
 
-public extension CloudStorable where Self == MediaItem {
-    static func defaultRecordType() -> String {
-        return "MediaItem"
-    }
-
-    static func defaultPredicate() -> NSPredicate {
-        return NSPredicate(value: true)
-    }
-
-    func isSameAs(_ other: Self) -> Bool {
-        return false // Defina sua lógica de comparação aqui
-    }
-}
-
-public extension CloudManager where T == MediaItem {
-    func saveImage(_ image: UIImage, withDescription description: String, completion: @escaping (Result<MediaItem, Error>) -> Void) {
-        guard let data = image.jpegData(compressionQuality: 0.7) else {
-            completion(.failure(NSError(domain: "ImageError", code: -1, userInfo: [NSLocalizedDescriptionKey: "Failed to convert UIImage to Data"])))
-            return
-        }
+    
+    func toCKAsset(from data: Data, withKey key: String) -> CKAsset? {
+        let fileURL = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent(UUID().uuidString)
         
-        let temporaryURL = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent(UUID().uuidString).appendingPathExtension("jpg")
         do {
-            try data.write(to: temporaryURL)
-            let asset = CKAsset(fileURL: temporaryURL)
-            let mediaItem = MediaItem(asset: asset, type: .image, description: description)
-            saveItem(mediaItem, completion: completion)
+            try data.write(to: fileURL)
+            return CKAsset(fileURL: fileURL)
         } catch {
-            completion(.failure(error))
+            print("Erro ao converter dados para CKAsset: \(error.localizedDescription)")
+            return nil
+        }
+    }
+
+    func data(from asset: CKAsset?) -> Data? {
+        guard let asset = asset else { return nil }
+        do {
+            let data = try Data(contentsOf: asset.fileURL!)
+            return data
+        } catch {
+            print("Erro ao converter CKAsset para dados: \(error.localizedDescription)")
+            return nil
         }
     }
     
-    // Similarmente, você pode adicionar um método para salvar vídeos, etc.
+    static func data(from asset: CKAsset?) -> Data? {  // Faça este método estático
+        guard let asset = asset else { return nil }
+        do {
+            let data = try Data(contentsOf: asset.fileURL!)
+            return data
+        } catch {
+            print("Erro ao converter CKAsset para dados: \(error.localizedDescription)")
+            return nil
+        }
+    }
 }
+
