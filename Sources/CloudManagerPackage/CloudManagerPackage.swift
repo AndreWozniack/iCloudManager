@@ -239,16 +239,27 @@ public extension CloudStorable {
         
         for child in mirror.children {
             if let key = child.label {
-                if let dataValue = child.value as? Data {
-                    record.setValue(toCKAsset(from: dataValue, withKey: key), forKey: key)
-                } else {
-                    record.setValue(child.value, forKey: key)
+                switch key {
+                case "url":  // Verifique se é a propriedade 'url' de 'Video'
+                    if let urlValue = child.value as? URL {
+                        let data = try? Data(contentsOf: urlValue)
+                        if let dataValue = data {
+                            record.setValue(toCKAsset(from: dataValue, withKey: key), forKey: key)
+                        }
+                    }
+                default:
+                    if let dataValue = child.value as? Data {
+                        record.setValue(toCKAsset(from: dataValue, withKey: key), forKey: key)
+                    } else {
+                        record.setValue(child.value, forKey: key)
+                    }
                 }
             }
         }
         
         return record
     }
+
 
     
     static func fromCKRecord(_ record: CKRecord) -> Self? {
