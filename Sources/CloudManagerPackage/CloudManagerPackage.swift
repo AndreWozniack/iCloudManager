@@ -7,6 +7,11 @@ public protocol CloudStorable {
     func toCKRecord() -> CKRecord
 }
 
+public protocol Relatable: CloudStorable {
+    var parentRef: CKRecord.Reference? { get set }
+}
+
+
 /**
  `CloudManager` é uma classe genérica projetada para simplificar o processo de interação com o CloudKit, permitindo operações CRUD (Criar, Ler, Atualizar e Deletar) em registros do iCloud.
 
@@ -213,8 +218,87 @@ public class CloudManager<T: CloudStorable> {
             }
         }
     }
+    
+    public func saveParentWithChildren<Child: Relatable>(parent: T, children: [Child], completion: @escaping (Result<Void, Error>) -> Void) {
+        saveItem(parent) { result in
+            switch result {
+            case .success(let savedParent):
+                let parentReference = CKRecord.Reference(recordID: savedParent.toCKRecord().recordID, action: .deleteSelf)
+                
+                let updatedChildren = children.map { child -> Child in
+                    var childCopy = child
+                    childCopy.parentRef = parentReference
+                    return childCopy
+                }
+                
+                let childCloudManager = CloudManager<Child>()
+                let group = DispatchGroup()
+                for child in updatedChildren {
+                    group.enter()
+                    childCloudManager.saveItem(child) { _ in
+                        group.leave()
+                    }
+                }
+                
+                group.notify(queue: .main) {
+                    completion(.success(()))
+                }
+                
+            case .failure(let error):
+                completion(.failure(error))
+            }
+        }
+    }
+    ///On cascade
+//    public func saveParentWithChildrenInCascade<Child: Relatable>(parent: T, children: [Child], completion: @escaping (Result<Void, Error>) -> Void) {
+//        saveItem(parent) { result in
+//            switch result {
+//            case .success(let savedParent):
+//                let parentReference = CKRecord.Reference(recordID: savedParent.toCKRecord().recordID, action: .deleteSelf)
+//
+//                let updatedChildren = children.map { child -> Child in
+//                    var childCopy = child
+//                    childCopy.parentRef = parentReference
+//                    return childCopy
+//                }
+//
+//                let childCloudManager = CloudManager<Child>()
+//                let group = DispatchGroup()
+//
+//                for child in updatedChildren {
+//                    group.enter()
+//                    childCloudManager.saveItem(child) { childResult in
+//                        switch childResult {
+//                        case .success(let savedChild):
+//                            // Aqui, você pode chamar recursivamente a função para salvar os "SubChildren" do "Child", se houver.
+//                            // Por exemplo:
+//                            let subChildCloudManager = CloudManager<SubChild>()
+//                            subChildCloudManager.saveParentWithChildrenInCascade(parent: savedChild, children: savedChild.subChildren) { _ in
+//                                group.leave()
+//                            }
+//                            group.leave()
+//                        case .failure(_):
+//                            group.leave()
+//                        }
+//                    }
+//                }
+//
+//                group.notify(queue: .main) {
+//                    completion(.success(()))
+//                }
+//
+//            case .failure(let error):
+//                completion(.failure(error))
+//            }
+//        }
+//    }
 
-
+        // Recuperar relação de um para muitos
+    public func fetchChildrenForParent<Child: Relatable>(parent: T, completion: @escaping (Result<[Child], Error>) -> Void) {
+        let predicate = NSPredicate(format: "parentRef == %@", parent.toCKRecord().recordID)
+        let childCloudManager = CloudManager<Child>()
+        childCloudManager.fetchItems(withPredicate: predicate, completion: completion)
+    }
 }
 
 
@@ -239,20 +323,24 @@ public extension CloudStorable {
         
         for child in mirror.children {
             if let key = child.label {
-                switch key {
-                case "url":  // Verifique se é a propriedade 'url' de 'Video'
-                    if let urlValue = child.value as? URL {
-                        let data = try? Data(contentsOf: urlValue)
-                        if let dataValue = data {
-                            record.setValue(toCKAsset(from: dataValue, withKey: key), forKey: key)
-                        }
+                switch child.value {
+                case let value as CloudStorable:
+                    // Se o valor é CloudStorable, salve-o como um CKRecord separado e adicione uma referência
+                    let childRecord = value.toCKRecord()
+                    let reference = CKRecord.Reference(record: childRecord, action: .deleteSelf)
+                    record.setValue(reference, forKey: key)
+                    
+                case let valueArray as [CloudStorable]:
+                    // Se o valor é uma lista de CloudStorable, salve cada item como um CKRecord e adicione uma lista de referências
+                    let references = valueArray.map { item -> CKRecord.Reference in
+                        let itemRecord = item.toCKRecord()
+                        return CKRecord.Reference(record: itemRecord, action: .deleteSelf)
                     }
+                    record.setValue(references, forKey: key)
+                    
                 default:
-                    if let dataValue = child.value as? Data {
-                        record.setValue(toCKAsset(from: dataValue, withKey: key), forKey: key)
-                    } else {
-                        record.setValue(child.value, forKey: key)
-                    }
+                    // Para outros tipos de valores, tente salvar diretamente
+                    record.setValue(child.value, forKey: key)
                 }
             }
         }
@@ -261,16 +349,49 @@ public extension CloudStorable {
     }
 
 
-    
     static func fromCKRecord(_ record: CKRecord) -> Self? {
         var initializers: [String: Any] = [:]
 
         let mirror = Mirror(reflecting: Self.self)
         for child in mirror.children {
             if let key = child.label {
-                if record[key] is CKAsset {
-                    initializers[key] = Self.data(from: record[key] as? CKAsset)  // Use 'Self' para chamar métodos estáticos
+                if let reference = record[key] as? CKRecord.Reference {
+                    // Se o valor é uma referência, busque o CKRecord associado
+                    let semaphore = DispatchSemaphore(value: 0)
+                    let database = CKContainer.default().privateCloudDatabase
+                    database.fetch(withRecordID: reference.recordID) { fetchedRecord, error in
+                        if let fetchedRecord = fetchedRecord {
+                            let itemType = child.value as? CloudStorable.Type
+                            if let item = itemType?.fromCKRecord(fetchedRecord) {
+                                initializers[key] = item
+                            }
+                        }
+                        semaphore.signal()
+                    }
+                    semaphore.wait()
+                    
+                } else if let references = record[key] as? [CKRecord.Reference] {
+                    // Se o valor é uma lista de referências, busque todos os CKRecords associados
+                    var items: [CloudStorable] = []
+                    let group = DispatchGroup()
+                    for reference in references {
+                        group.enter()
+                        let database = CKContainer.default().privateCloudDatabase
+                        database.fetch(withRecordID: reference.recordID) { fetchedRecord, error in
+                            if let fetchedRecord = fetchedRecord {
+                                let itemType = child.value as? CloudStorable.Type
+                                if let item = itemType?.fromCKRecord(fetchedRecord) {
+                                    items.append(item)
+                                }
+                            }
+                            group.leave()
+                        }
+                    }
+                    group.wait()
+                    initializers[key] = items
+                    
                 } else {
+                    // Para outros tipos de valores, tente recuperar diretamente
                     initializers[key] = record[key]
                 }
             }
@@ -278,7 +399,6 @@ public extension CloudStorable {
 
         return Self.init(from: record)
     }
-
     
     func toCKAsset(from data: Data, withKey key: String) -> CKAsset? {
         let fileURL = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent(UUID().uuidString)
@@ -313,5 +433,7 @@ public extension CloudStorable {
             return nil
         }
     }
+    
+    
 }
 
