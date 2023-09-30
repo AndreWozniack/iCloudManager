@@ -304,6 +304,17 @@ public class CloudManager<T: CloudStorable> {
 
 
 public extension CloudStorable {
+    
+    init?(from record: CKRecord) {
+        // Implementação padrão do inicializador
+        // Por exemplo, você pode tentar inicializar a classe usando o método fromCKRecord:
+        if let instance = Self.fromCKRecord(record) {
+            self = instance
+        } else {
+            return nil
+        }
+    }
+    
     static func defaultRecordType() -> String {
             return String(describing: Self.self)
         }
