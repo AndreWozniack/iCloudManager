@@ -2,7 +2,6 @@ import Foundation
 import CloudKit
 
 public protocol CloudStorable {
-    init?(from record: CKRecord)
     static func fromCKRecord(_ record: CKRecord) -> Self?
     func toCKRecord() -> CKRecord
 }
